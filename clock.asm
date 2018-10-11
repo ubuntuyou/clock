@@ -23,6 +23,11 @@ rowCounter      .dsb 1
 softPPU_Control .dsb 1
 softPPU_Mask    .dsb 1
 
+hours           .dsb 1
+minutes         .dsb 1
+seconds         .dsb 1
+tick            .dsb 1
+
     .ende
 
     .enum $0400 ; Variables at $0400. Can start on any RAM page
@@ -196,13 +201,49 @@ loadSprite:
     sta PPU_Mask
     sta softPPU_Mask
 
+    lda #$3C
+    sta tick
+    lda #$30
+    sta seconds
+    lda #$3B
+    sta minutes
+    lda #$0C
+    sta hours
+
     jmp MAIN
     
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;;;   SUBROUTINES   ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;
 
+timekeeping:
+    ldx #$00
 
+    dec tick
+    bne timekeepingDone
+    lda #$3C
+    sta tick
+
+    inc seconds
+    lda seconds
+    cmp #$3C
+    bne timekeepingDone
+    stx seconds
+
+    inc minutes
+    lda minutes
+    cmp #$3C
+    bne timekeepingDone
+    stx minutes
+    
+    inc hours
+    lda hours
+    cmp #$0D
+    bne timekeepingDone
+    inx
+    stx hours
+timekeepingDone:
+    rts
 
 ;;;;;;;;;;;;;;;;
 ;;;   MAIN   ;;;
@@ -227,6 +268,8 @@ NMI:
     pha
     tya
     pha
+    
+    jsr timekeeping
 
     lda #$00
     sta $2003
