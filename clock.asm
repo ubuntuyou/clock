@@ -28,6 +28,9 @@ minutes         .dsb 1
 seconds         .dsb 1
 tick            .dsb 1
 
+buttons         .dsb 1
+oldButtons      .dsb 1
+
     .ende
 
     .enum $0400 ; Variables at $0400. Can start on any RAM page
@@ -50,6 +53,9 @@ PPU_Address     .equ $2006
 PPU_Data        .equ $2007
 
 spriteRAM       .equ $0200
+
+CONTROLLER_1    .equ $4016
+
     .org $C000
 ;;;;;;;;;;;;;;;;;
 ;;;   RESET   ;;;
@@ -203,12 +209,40 @@ loadSprite:
 
     lda #$3C
     sta tick
-    lda #$30
+    lda #$00
     sta seconds
-    lda #$3B
     sta minutes
     lda #$0C
     sta hours
+    
+    lda #$80
+    sta timeRAM+0
+    sta timeRAM+4
+    sta timeRAM+8
+    sta timeRAM+12
+    sta timeRAM+16
+    sta timeRAM+20
+
+    lda #$00
+    sta timeRAM+2
+    sta timeRAM+6
+    sta timeRAM+10
+    sta timeRAM+14
+    sta timeRAM+18
+    sta timeRAM+22
+
+    lda #$38
+    sta timeRAM+3
+    lda #$30
+    sta timeRAM+7
+    lda #$28
+    sta timeRAM+11
+    lda #$20
+    sta timeRAM+15
+    lda #$18
+    sta timeRAM+19
+    lda #$10
+    sta timeRAM+23
 
     jmp MAIN
     
@@ -229,12 +263,20 @@ timekeeping:
     cmp #$3C
     bne timekeepingDone
     stx seconds
+    lda tick            ; Add 6 cycles per second to get 60.1 Hz
+    clc
+    adc #$06
+    sta tick
 
     inc minutes
     lda minutes
     cmp #$3C
     bne timekeepingDone
     stx minutes
+    lda tick            ; Actual framerate is ~60.098 Hz which is another 7.2 cycles per hour
+    sec
+    sbc #$07
+    sta tick
     
     inc hours
     lda hours
@@ -242,8 +284,164 @@ timekeeping:
     bne timekeepingDone
     inx
     stx hours
-timekeepingDone:
+    dec tick            ; .2 cycles per hour is 4.8 cycles per day so subtract 2 cycles per half day
+    dec tick            ;  for a remainder of .8 cycles per day or ~4.9 seconds per year too fast
+timekeepingDone:        ;  not accounting for crystal drift.
     rts
+    
+timeRAM = $0280
+
+displayTime:
+    lda seconds
+    and #$0F
+    tax
+    lda digits,x
+    sta timeRAM+1
+    lda seconds
+    lsr
+    lsr
+    lsr
+    lsr
+    tax
+    lda digits,x
+    sta timeRAM+5
+
+    lda minutes
+    and #$0F
+    tax
+    lda digits,x
+    sta timeRAM+9
+    lda minutes
+    lsr
+    lsr
+    lsr
+    lsr
+    tax
+    lda digits,x
+    sta timeRAM+13
+
+    lda hours
+    and #$0F
+    tax
+    lda digits,x
+    sta timeRAM+17
+    lda hours
+    lsr
+    lsr
+    lsr
+    lsr
+    tax
+    lda digits,x
+    sta timeRAM+21
+displayTimeDone:
+    rts
+
+digits:
+    .db $a0,$a1,$a2,$a3,$a4,$a5,$a6,$a7,$a8,$a9,$aa,$ab,$ac,$ad,$ae,$af
+
+latchController:
+    lda #$01
+    sta CONTROLLER_1
+    lda #$00
+    sta CONTROLLER_1
+
+    lda buttons
+    sta oldButtons
+
+    ldx #$08
+@loop
+    lda CONTROLLER_1
+    lsr
+    rol buttons
+    dex
+    bne @loop
+latchControllerDone:
+    rts
+    
+incMins:
+    lda buttons
+    and #%00001000
+    beq incMinsDone
+    
+    lda oldButtons
+    and #%00001000
+    bne incMinsDone
+    
+    inc minutes
+    lda minutes
+    cmp #$3C
+    bne incMinsDone
+    lda #$00
+    sta minutes
+incMinsDone:
+    rts
+    
+decMins:
+    lda buttons
+    and #%00000100
+    beq decMinsDone
+    
+    lda oldButtons
+    and #%00000100
+    bne decMinsDone
+
+    dec minutes
+    bpl decMinsDone
+    lda #$3B
+    sta minutes
+decMinsDone:
+    rts
+    
+incHours:
+    lda buttons
+    and #%00000010
+    beq incHoursDone
+    
+    lda oldButtons
+    and #%00000010
+    bne incHoursDone
+    
+    inc hours
+    lda hours
+    cmp #$0D
+    bne incHoursDone
+    lda #$01
+    sta hours
+incHoursDone:
+    rts
+    
+decHours:
+    lda buttons
+    and #%00000001
+    beq decHoursDone
+    
+    lda oldButtons
+    and #%00000001
+    bne decHoursDone
+
+    dec hours
+    bne decHoursDone
+    lda #$0C
+    sta hours
+decHoursDone:
+    rts
+    
+clearSecs:
+    lda buttons
+    and #%10000000
+    beq clearSecsDone
+    
+    lda oldButtons
+    and #%10000000
+    bne clearSecsDone
+    
+    lda #$00
+    sta seconds
+    lda #$3C
+    sta tick
+clearSecsDone:
+    rts
+
 
 ;;;;;;;;;;;;;;;;
 ;;;   MAIN   ;;;
@@ -254,6 +452,14 @@ MAIN:
 loop:
     lda sleeping
     bne loop
+    
+    jsr incMins
+    jsr decMins
+    jsr incHours
+    jsr decHours
+    jsr clearSecs
+    
+    jsr displayTime
 
     jmp MAIN
 MAINdone:
@@ -268,13 +474,14 @@ NMI:
     pha
     tya
     pha
-    
-    jsr timekeeping
 
     lda #$00
     sta $2003
     lda #$02
     sta $4014
+
+    jsr timekeeping
+    jsr latchController
 
     lda #$00
     sta PPU_Address
@@ -338,7 +545,7 @@ attributes:
 
 palette:
     .db $0F,$0F,$0F,$0F,  $0F,$20,$20,$0F,  $0F,$20,$0F,$20,  $0F,$20,$20,$20   ;;background palette
-    .db $0F,$27,$17,$07,  $0F,$20,$10,$00,  $0F,$1C,$15,$14,  $0F,$02,$38,$3C   ;;sprite palette
+    .db $0F,$20,$17,$07,  $0F,$0F,$10,$00,  $0F,$1C,$15,$14,  $0F,$02,$38,$3C   ;;sprite palette
 
     ;;;  00   01   02   03   04   05   06   07   08   09   0A   0B   0C   0D   0E   0F   10   11   12
 topLeft:
