@@ -31,10 +31,6 @@ tick            .dsb 1
 buttons         .dsb 1
 oldButtons      .dsb 1
 
-    .ende
-
-    .enum $0400 ; Variables at $0400. Can start on any RAM page
-
 sleeping        .dsb 1
 
     .ende
@@ -151,12 +147,11 @@ metaBackground:
     bne @top
 
 loadAttributes:
-    ldx #$00
+    ldx #$40
+    lda #$FF
 @loop:
-    lda attributes,x
     sta PPU_Data
-    inx
-    cpx #$40
+    dex
     bne @loop
 
     lda #<palette
@@ -199,6 +194,15 @@ loadSprite:
     cpx #$10
     bne @loop
 
+attbRAM = $0100
+
+setupAttbRAM:
+    ldx #$18
+@loop
+    lda attributes,x
+    sta attbRAM,x
+    dex
+    bpl @loop
 
     lda #%10010000
     sta PPU_Control
@@ -273,8 +277,8 @@ timekeeping:
     cmp #$3C
     bne timekeepingDone
     stx minutes
-    lda tick            ; Actual framerate is ~60.098 Hz which is another 7.2 cycles per hour
-    sec
+    lda tick            ; Actual framerate is ~60.098 Hz which is 7.2 cycles per hour slower than 60.1 Hz
+    sec                 ;  so subtract 7 cycles per hour
     sbc #$07
     sta tick
     
@@ -289,55 +293,60 @@ timekeeping:
 timekeepingDone:        ;  not accounting for crystal drift.
     rts
     
-timeRAM = $0280
-
-displayTime:
+timeAttb:
     lda seconds
-    and #$0F
-    tax
-    lda digits,x
-    sta timeRAM+1
-    lda seconds
-    lsr
-    lsr
-    lsr
-    lsr
-    tax
-    lda digits,x
-    sta timeRAM+5
+    bne timeAttbDone
 
-    lda minutes
-    and #$0F
-    tax
-    lda digits,x
-    sta timeRAM+9
-    lda minutes
-    lsr
-    lsr
-    lsr
-    lsr
-    tax
-    lda digits,x
-    sta timeRAM+13
-
-    lda hours
-    and #$0F
-    tax
-    lda digits,x
-    sta timeRAM+17
-    lda hours
-    lsr
-    lsr
-    lsr
-    lsr
-    tax
-    lda digits,x
-    sta timeRAM+21
-displayTimeDone:
+    lda PPU_Status
+    lda #$23
+    sta PPU_Address
+    lda #$D0
+    sta PPU_Address
+    
+    ldx #$00
+@loop
+    lda attbRAM,x
+    sta PPU_Data
+    inx
+    cpx #$18
+    bne @loop
+timeAttbDone:
     rts
-
-digits:
-    .db $a0,$a1,$a2,$a3,$a4,$a5,$a6,$a7,$a8,$a9,$aa,$ab,$ac,$ad,$ae,$af
+    
+ timeRAM = $0280
+; 
+; displayTime:
+;     lda seconds
+;     and #$0F
+;     sta timeRAM+1
+;     lda seconds
+;     lsr
+;     lsr
+;     lsr
+;     lsr
+;     sta timeRAM+5
+; 
+;     lda minutes
+;     and #$0F
+;     sta timeRAM+9
+;     lda minutes
+;     lsr
+;     lsr
+;     lsr
+;     lsr
+;     sta timeRAM+13
+; 
+;     lda hours
+;     and #$0F
+;     sta timeRAM+17
+;     lda hours
+;     lsr
+;     lsr
+;     lsr
+;     lsr
+;     sta timeRAM+21
+; displayTimeDone:
+;     rts
 
 latchController:
     lda #$01
@@ -357,7 +366,19 @@ latchController:
     bne @loop
 latchControllerDone:
     rts
+
+processInput:
+    lda buttons
+    beq processInputDone
     
+    jsr incMins
+    jsr decMins
+    jsr incHours
+    jsr decHours
+    jsr clearSecs
+processInputDone:
+    rts
+
 incMins:
     lda buttons
     and #%00001000
@@ -453,13 +474,9 @@ loop:
     lda sleeping
     bne loop
     
-    jsr incMins
-    jsr decMins
-    jsr incHours
-    jsr decHours
-    jsr clearSecs
+    jsr processInput
     
-    jsr displayTime
+;    jsr displayTime
 
     jmp MAIN
 MAINdone:
@@ -480,6 +497,7 @@ NMI:
     lda #$02
     sta $4014
 
+    jsr timeAttb
     jsr timekeeping
     jsr latchController
 
@@ -508,40 +526,37 @@ NMIdone:
 ;;;;;;;;;;;;;;;;;;
 ;;;   TABLES   ;;;
 ;;;;;;;;;;;;;;;;;;
-    .align $100
+
     
 background:
-    .db $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F
-    .db $0F, $00, $01, $02, $00, $01, $02, $0F, $0F, $00, $01, $02, $00, $01, $02, $0F
-    .db $0F, $03, $0F, $05, $03, $0F, $05, $0F, $0F, $03, $0F, $05, $03, $0F, $05, $0F
-    .db $0F, $06, $07, $08, $06, $07, $08, $0F, $0F, $06, $07, $08, $06, $07, $08, $0F
-    .db $0F, $09, $0F, $0B, $09, $0F, $0B, $0F, $0F, $09, $0F, $0B, $09, $0F, $0B, $0F
-    .db $0F, $0C, $0D, $0E, $0C, $0D, $0E, $0F, $0F, $0C, $0D, $0E, $0C, $0D, $0E, $0F
-    .db $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F
-    .db $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F
-    .db $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F
-    .db $0F, $00, $01, $02, $00, $01, $02, $0F, $0F, $00, $01, $02, $00, $01, $02, $0F
-    .db $0F, $03, $0F, $05, $03, $0F, $05, $0F, $0F, $03, $0F, $05, $03, $0F, $05, $0F
-    .db $0F, $06, $07, $08, $06, $07, $08, $0F, $0F, $06, $07, $08, $06, $07, $08, $0F
-    .db $0F, $09, $0F, $0B, $09, $0F, $0B, $0F, $0F, $09, $0F, $0B, $09, $0F, $0B, $0F
-    .db $0F, $0C, $0D, $0E, $0C, $0D, $0E, $0F, $0F, $0C, $0D, $0E, $0C, $0D, $0E, $0F
-    .db $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F
-    .db $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F
+    .db $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A
+    .db $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C
+    .db $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A
+    .db $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C
+    .db $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A
+    .db $0B, $0C, $02, $00, $01, $02, $0B, $0C, $00, $01, $02, $00, $01, $02, $0B, $0C
+    .db $09, $0A, $03, $03, $09, $03, $09, $0A, $03, $0A, $03, $03, $09, $03, $09, $0A
+    .db $0B, $0C, $06, $05, $01, $06, $0B, $0C, $05, $01, $06, $05, $01, $06, $0B, $0C
+    .db $09, $0A, $03, $03, $09, $03, $09, $0A, $03, $0A, $03, $03, $09, $03, $09, $0A
+    .db $0B, $0C, $08, $07, $01, $08, $0B, $0C, $07, $01, $08, $07, $01, $08, $0B, $0C
+    .db $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A
+    .db $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C
+    .db $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A
+    .db $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C
+    .db $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A, $09, $0A
+    .db $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C
 
 attributes:
-    .db $00, $40, $AF, $F0, $F0, $F0, $F0, $F0, $00, $CF, $A0, $9F, $FF, $CF, $3F, $FF
-    .db $00, $8F, $FF, $90, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00
-    .db $00, $40, $00, $10, $00, $40, $00, $10, $00, $CF, $00, $FF, $00, $CF, $00, $FF
-    .db $00, $8F, $00, $2F, $00, $8F, $00, $2F, $00, $00, $00, $00, $00, $00, $00, $00
 
-;     .db %00000000, %01000000, %00000000, %00010000, %01000000, %00000000, %00010000, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
-;     .db %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+;         7654 3210
+;         |||| ||++- Color bits 1-0 for top left quadrant of this byte
+;         |||| ++--- Color bits 3-2 for top right quadrant of this byte
+;         ||++------ Color bits 5-4 for bottom left quadrant of this byte
+;         ++-------- Color bits 7-6 for bottom right quadrant of this byte
+
+     .db %11111111, %10011111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+     .db %11111111, %10110011, %01111111, %11111111, %00111111, %11111111, %11001111, %11111111
+     .db %11111111, %11101111, %01110011, %11111111, %11111111, %11111111, %11111111, %11111111
 
 palette:
     .db $0F,$0F,$0F,$0F,  $0F,$20,$20,$0F,  $0F,$20,$0F,$20,  $0F,$20,$20,$20   ;;background palette
@@ -549,23 +564,23 @@ palette:
 
     ;;;  00   01   02   03   04   05   06   07   08   09   0A   0B   0C   0D   0E   0F   10   11   12
 topLeft:
-    .db $00, $02, $04, $20, $22, $24, $40, $42, $44, $60, $62, $64, $80, $82, $84, $EE, $EF, $FE, $FF
+    .db $00, $1C, $02, $0C, $0C, $04, $06, $08, $0A, $0E, $EE, $EE, $EE
 
 topRight:
-    .db $01, $03, $05, $21, $23, $25, $41, $43, $45, $61, $62, $65, $81, $83, $85, $EE, $EF, $FE, $FF
+    .db $01, $1C, $03, $0D, $0D, $05, $07, $09, $0B, $EE, $0F, $EE, $EE
 
 bottomLeft:
-    .db $10, $12, $14, $30, $32, $34, $50, $52, $54, $70, $72, $74, $90, $92, $94, $EE, $EF, $FE, $FF
+    .db $10, $1D, $12, $0C, $0C, $14, $16, $18, $1A, $EE, $EE, $1E, $EE
 
 bottomRight:
-    .db $11, $13, $15, $31, $33, $35, $51, $53, $55, $71, $73, $75, $91, $93, $95, $EE, $EF, $FE, $FF
+    .db $11, $1D, $13, $0D, $0D, $15, $17, $19, $1B, $EE, $EE, $EE, $1F
 
 
 sprite_Y:
     .db $2F, $37, $2F, $37, $2F, $37, $2F, $37, $2F, $37, $2F, $37, $2F, $37, $2F, $37
 
 sprite_Tile:
-    .db $06, $06, $06, $06, $06, $06, $06, $06, $06, $06, $06, $06, $06, $06, $06, $06
+    .db $10, $10, $10, $10, $10, $10, $10, $10, $10, $10, $10, $10, $10, $10, $10, $10
 
 sprite_Attrib:
     .db $00, $80, $40, $C0, $00, $80, $40, $C0, $00, $80, $40, $C0, $00, $80, $40, $C0
